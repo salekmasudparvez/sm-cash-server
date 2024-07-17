@@ -5,13 +5,10 @@ const app = express();
 const port = process.env.PORT || 5000;
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const jwt = require("jsonwebtoken");
-const bcrypt = require('bcrypt');
+const bcrypt = require("bcrypt");
 
 const corsOptions = {
-  origin: [
-    "http://localhost:5173",
-    "http://localhost:5000",
-  ],
+  origin: ["http://localhost:5173", "http://localhost:5000"],
   credentials: true,
   optionSuccessStatus: 200,
 };
@@ -53,8 +50,8 @@ async function run() {
 
     // Handle user registration
     app.post("/user", async (req, res) => {
-      const { username, email, phoneNumber, pinNumber } = req.body;
-      if (!username || !email || !phoneNumber || !pinNumber) {
+      const { username, email, phoneNumber, pinNumber, role } = req.body;
+      if (!username || !email || !phoneNumber || !pinNumber || !role) {
         return res.status(400).send({ error: "All fields are required" });
       }
 
@@ -74,7 +71,8 @@ async function run() {
           email,
           phoneNumber,
           pinNumber: hashPin,
-          role:"user"
+          role,
+          status: "pending",
         });
         res.send({ message: "User created successfully", user: result });
       } catch (error) {
@@ -82,14 +80,54 @@ async function run() {
         res.status(500).send({ error: "Internal Server Error" });
       }
     });
-    app.get('/user', (req,res)=>{
-        const  token  = localStorage.getItem('accessToken')
-        console.log(token,'line87')
-        res.send({ message: "wait for email"})
-        //if (!token) return res.status(401).send({ error: "Access denied. No token provided." });
-    })
+    //call in useRole
+    app.get("/useRole/:email", async (req, res) => {
+      const userEmail = req.params.email;
+      const user = await usersCollection.findOne({ email: userEmail });
+      res.send(user);
+    });
+   
+    //login-verify
+    app.post("/login", async (req, res) => {
+      const { emailNumber, pin } = req.body;
+      console.log(emailNumber, pin, "[[[[[[[[[[[[[[[[");
+  
+      let query = {};
+      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNumber)) {
+          query = { email: emailNumber };
+      } else {
+          query = { phoneNumber: emailNumber };
+      }
+  
+      const user = await usersCollection.findOne(query);
+      if (user) {
+          const valid = await bcrypt.compare(pin, user.pinNumber);
+          if (valid) {
+            const token = jwt.sign(
+              { email: user.email },
+              process.env.ACCESS_TOKEN_SECRET,
+              {
+                expiresIn: "365d",
+              }
+            );
+              res.send({  token });
+          } else {
+              res.status(401).send({ error: "Invalid credentials" });
+          }
+      } else {
+          res.status(401).send({ error: "User not found" });
+      }
+  });
+  //admin get user 
+  app.get("/admin/users", async (req, res) => {
+    const users = await usersCollection.find({}).toArray();
+    res.send(users);
+  });
+  
 
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    console.log(
+      "Pinged your deployment. You successfully connected to MongoDB!"
+    );
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
