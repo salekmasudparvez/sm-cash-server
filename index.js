@@ -31,6 +31,7 @@ async function run() {
     await client.connect();
     const db = client.db("SM-Cash");
     const usersCollection = db.collection("users");
+    const balanceCollection = db.collection("balance");
 
     // JWT related API
     app.post("/jwt", (req, res) => {
@@ -86,68 +87,86 @@ async function run() {
       const user = await usersCollection.findOne({ email: userEmail });
       res.send(user);
     });
-   
+
     //login-verify
     app.post("/login", async (req, res) => {
       const { emailNumber, pin } = req.body;
       console.log(emailNumber, pin, "[[[[[[[[[[[[[[[[");
-  
+
       let query = {};
       if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNumber)) {
-          query = { email: emailNumber };
+        query = { email: emailNumber };
       } else {
-          query = { phoneNumber: emailNumber };
+        query = { phoneNumber: emailNumber };
       }
-  
+
       const user = await usersCollection.findOne(query);
       if (user) {
-          const valid = await bcrypt.compare(pin, user.pinNumber);
-          if (valid) {
-            const token = jwt.sign(
-              { email: user.email },
-              process.env.ACCESS_TOKEN_SECRET,
-              {
-                expiresIn: "365d",
-              }
-            );
-              res.send({  token });
-          } else {
-              res.status(401).send({ error: "Invalid credentials" });
-          }
+        const valid = await bcrypt.compare(pin, user.pinNumber);
+        if (valid) {
+          const token = jwt.sign(
+            { email: user.email },
+            process.env.ACCESS_TOKEN_SECRET,
+            {
+              expiresIn: "365d",
+            }
+          );
+          res.send({ token });
+        } else {
+          res.status(401).send({ error: "Invalid credentials" });
+        }
       } else {
-          res.status(401).send({ error: "User not found" });
+        res.status(401).send({ error: "User not found" });
       }
-  });
-  //admin get user 
-  app.get("/admin/users", async (req, res) => {
-    const users = await usersCollection.find({}).toArray();
-    res.send(users);
-  });
-  //admin set status
-  app.patch('/admin/user', async (req, res) => {
-    const { id, status, email } = req.body;
-    //console.log(id, status, email, 'line129');
-  
-    if (!id || !status ) {
-      return res.status(400).send({ error: 'ID and role are required' });
-    }
-  
-    
+    });
+    //admin get user
+    app.get("/admin/users", async (req, res) => {
+      const name = req.query.name;
+      let query = {};
+
+      if (name) {
+        console.log(name, "125");
+        query = { username: { $regex: name, $options: "i" } };
+      }
+      const users = await usersCollection.find(query).toArray();
+      res.send(users);
+    });
+    //admin set status
+    app.patch("/admin/user", async (req, res) => {
+      const { id, status, email } = req.body;
+      //console.log(id, status, email, 'line129');
+
+      if (!id || !status) {
+        return res.status(400).send({ error: "ID and role are required" });
+      }
+      if(status === 'approved') {
+        const newBalance = await balanceCollection.insertOne({balance:40,ownerEmail:email, userID:id});
+
+      }
       const updateDoc = {
         $set: {
-          status
-        }
+          status,
+        },
       };
-  
-      const filter = {
-        _id: new ObjectId(id)
-      };
-  
-      const updateStatus = await usersCollection.updateOne(filter, updateDoc);
-     console.log(updateStatus,'------updates')
-   res.send(updateStatus);
-  });
 
+      const filter = {
+        _id: new ObjectId(id),
+      };
+
+      const updateStatus = await usersCollection.updateOne(filter, updateDoc);
+      console.log(updateStatus, "------updates");
+      res.send(updateStatus);
+    });
+     //user and agent get balance info
+     app.get('/balance/:email',async(req,res)=>{
+       const userEmail = req.params.email;
+       const user = await balanceCollection.findOne({ ownerEmail: userEmail });
+       if(user){
+         res.send(user);
+       }else{
+         res.status(404).send({ error: "User not found" });
+       }
+     })
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
