@@ -32,6 +32,8 @@ async function run() {
     const db = client.db("SM-Cash");
     const usersCollection = db.collection("users");
     const balanceCollection = db.collection("balance");
+    const transactionsCollection = db.collection("transactions");
+    const agentCashCollection = db.collection("agentCash");
 
     // JWT related API
     app.post("/jwt", (req, res) => {
@@ -133,15 +135,19 @@ async function run() {
     });
     //admin set status
     app.patch("/admin/user", async (req, res) => {
-      const { id, status, email } = req.body;
+      const { id, status, email, phoneNumber,initialMoney } = req.body;
       //console.log(id, status, email, 'line129');
 
       if (!id || !status) {
         return res.status(400).send({ error: "ID and role are required" });
       }
-      if(status === 'approved') {
-        const newBalance = await balanceCollection.insertOne({balance:40,ownerEmail:email, userID:id});
-
+      if (status === "approved") {
+        const newBalance = await balanceCollection.insertOne({
+          balance: initialMoney,
+          ownerEmail: email,
+          ownerNumber: phoneNumber,
+          userID: id,
+        });
       }
       const updateDoc = {
         $set: {
@@ -157,16 +163,154 @@ async function run() {
       console.log(updateStatus, "------updates");
       res.send(updateStatus);
     });
-     //user and agent get balance info
-     app.get('/balance/:email',async(req,res)=>{
-       const userEmail = req.params.email;
-       const user = await balanceCollection.findOne({ ownerEmail: userEmail });
-       if(user){
-         res.send(user);
-       }else{
-         res.status(404).send({ error: "User not found" });
-       }
-     })
+    //user and agent get balance info
+    app.get("/balance/:email", async (req, res) => {
+      const userEmail = req.params.email;
+      const user = await balanceCollection.findOne({ ownerEmail: userEmail });
+      if (user) {
+        res.send(user);
+      } else {
+        res.status(404).send({ error: "User not found" });
+      }
+    });
+    //user send money and transactions creat
+    app.post("/sendmoney", async (req, res) => {
+      const { senderEmail, receiverNumber, amount, pin, type } = req.body;
+      // console.log(senderEmail, receiverNumber, amount, pin);
+
+      try {
+        const user = await usersCollection.findOne({ email: senderEmail });
+        if (!user) {
+          return res.status(404).send({ error: "Sender not found" });
+        }
+
+        const valid = await bcrypt.compare(pin, user.pinNumber);
+        // console.log(valid,"<<<<<<<<<<<<<<<<<<<<<<<<<")
+        if (!valid) {
+          return res.status(401).send({ error: "Invalid PIN" });
+        }
+
+        const receiver = await usersCollection.findOne({
+          phoneNumber: receiverNumber,
+        });
+        if (!receiver) {
+          return res.status(404).send({ error: "Receiver not found" });
+        }
+
+        if (receiver.status === "pending") {
+          return res
+            .status(400)
+            .send({ error: "Receiver's account not activated" });
+        }
+
+        // console.log(receiver.status)
+        const updateBalanceOwner = await balanceCollection.updateOne(
+          { ownerEmail: senderEmail },
+          { $inc: { balance: -amount } }
+        );
+
+        const updateBalanceReceiver = await balanceCollection.updateOne(
+          { ownerNumber: receiverNumber },
+          { $inc: { balance: amount } }
+        );
+
+        if (
+          updateBalanceOwner.modifiedCount === 1 &&
+          updateBalanceReceiver.modifiedCount === 1
+        ) {
+          const transaction = await transactionsCollection.insertOne({
+            senderEmail,
+            receiverNumber,
+            amount,
+            timestamp: new Date(),
+            status:"successful",
+            type:type
+          });
+          return res.send({ message: "Money sent successfully", transaction });
+        }
+
+        return res.status(500).send({ error: "Failed to update balances" });
+      } catch (error) {
+        console.error("Error processing request:", error);
+        return res.status(500).send({ error: "Internal Server Error" });
+      }
+    });
+
+    //cash-in-request 
+    app.post("/cashin", async (req, res) => {
+      const { senderEmail, receiverNumber, amount, pin, type } = req.body;
+      // console.log(senderEmail, receiverNumber, amount, pin);
+
+      try {
+        const user = await usersCollection.findOne({ email: senderEmail });
+        if (!user) {
+          return res.status(404).send({ error: "Sender not found" });
+        }
+
+        const valid = await bcrypt.compare(pin, user.pinNumber);
+        // console.log(valid,"<<<<<<<<<<<<<<<<<<<<<<<<<")
+        if (!valid) {
+          return res.status(401).send({ error: "Invalid PIN" });
+        }
+
+        const receiver = await usersCollection.findOne({
+          phoneNumber: receiverNumber,
+        });
+        if (!receiver) {
+          return res.status(404).send({ error: "Receiver not found" });
+        }
+
+        if (receiver.status === "pending") {
+          return res
+            .status(400)
+            .send({ error: "Receiver's account not activated" });
+        }
+
+        // console.log(receiver.status)
+        const updateBalanceOwner = await balanceCollection.updateOne(
+          { ownerEmail: senderEmail },
+          { $inc: { balance: -amount } }
+        );
+
+        const updateBalanceReceiver = await balanceCollection.updateOne(
+          { ownerNumber: receiverNumber },
+          { $inc: { balance: amount } }
+        );
+
+        if (
+          updateBalanceOwner.modifiedCount === 1 &&
+          updateBalanceReceiver.modifiedCount === 1
+        ) {
+          const transaction = await transactionsCollection.insertOne({
+            senderEmail,
+            receiverNumber,
+            amount,
+            timestamp: new Date(),
+            status:"successful",
+            type:type
+          });
+          return res.send({ message: "Money sent successfully", transaction });
+        }
+
+        return res.status(500).send({ error: "Failed to update balances" });
+      } catch (error) {
+        console.error("Error processing request:", error);
+        return res.status(500).send({ error: "Internal Server Error" });
+      }
+    });
+    //user transaction
+    app.get("/transactions/:email", async (req, res) => {
+      const userEmail = req.params.email;
+      const transactions = await transactionsCollection
+        .find({
+          senderEmail: userEmail,
+        })
+        .sort({ date: -1 })
+        .limit(10)
+        .toArray();
+    
+      res.send(transactions);
+    });
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
