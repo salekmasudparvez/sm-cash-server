@@ -123,7 +123,30 @@ async function run() {
     const users = await usersCollection.find({}).toArray();
     res.send(users);
   });
+  //admin set status
+  app.patch('/admin/user', async (req, res) => {
+    const { id, status, email } = req.body;
+    //console.log(id, status, email, 'line129');
   
+    if (!id || !status ) {
+      return res.status(400).send({ error: 'ID and role are required' });
+    }
+  
+    
+      const updateDoc = {
+        $set: {
+          status
+        }
+      };
+  
+      const filter = {
+        _id: new ObjectId(id)
+      };
+  
+      const updateStatus = await usersCollection.updateOne(filter, updateDoc);
+     console.log(updateStatus,'------updates')
+   res.send(updateStatus);
+  });
 
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
