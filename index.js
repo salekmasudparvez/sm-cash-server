@@ -239,7 +239,7 @@ async function run() {
     //cash-in-request 
     app.post("/cashin", async (req, res) => {
       const { senderEmail, receiverNumber, amount, pin, type } = req.body;
-      // console.log(senderEmail, receiverNumber, amount, pin);
+      console.log(senderEmail, receiverNumber, amount, pin,type);
 
       try {
         const user = await usersCollection.findOne({ email: senderEmail });
@@ -265,34 +265,58 @@ async function run() {
             .status(400)
             .send({ error: "Receiver's account not activated" });
         }
+        const createPending = await agentCashCollection.insertOne({
+          senderEmail,
+          receiverNumber,
+          amount,
+          timestamp: new Date(),
+          status:"pending",
+          type:type
+        })
+        return res.send({ message: "Cash in request successfully", createPending });
+      } catch (error) {
+        console.error("Error processing request:", error);
+        return res.status(500).send({ error: "Internal Server Error" });
+      }
+    });
+    //cash in and out request with same api
+    app.post("/cashin", async (req, res) => {
+      const { senderEmail, receiverNumber, amount, pin, type } = req.body;
+      console.log(senderEmail, receiverNumber, amount, pin,type);
 
-        // console.log(receiver.status)
-        const updateBalanceOwner = await balanceCollection.updateOne(
-          { ownerEmail: senderEmail },
-          { $inc: { balance: -amount } }
-        );
-
-        const updateBalanceReceiver = await balanceCollection.updateOne(
-          { ownerNumber: receiverNumber },
-          { $inc: { balance: amount } }
-        );
-
-        if (
-          updateBalanceOwner.modifiedCount === 1 &&
-          updateBalanceReceiver.modifiedCount === 1
-        ) {
-          const transaction = await transactionsCollection.insertOne({
-            senderEmail,
-            receiverNumber,
-            amount,
-            timestamp: new Date(),
-            status:"successful",
-            type:type
-          });
-          return res.send({ message: "Money sent successfully", transaction });
+      try {
+        const user = await usersCollection.findOne({ email: senderEmail });
+        if (!user) {
+          return res.status(404).send({ error: "Sender not found" });
         }
 
-        return res.status(500).send({ error: "Failed to update balances" });
+        const valid = await bcrypt.compare(pin, user.pinNumber);
+        // console.log(valid,"<<<<<<<<<<<<<<<<<<<<<<<<<")
+        if (!valid) {
+          return res.status(401).send({ error: "Invalid PIN" });
+        }
+
+        const receiver = await usersCollection.findOne({
+          phoneNumber: receiverNumber,
+        });
+        if (!receiver) {
+          return res.status(404).send({ error: "Receiver not found" });
+        }
+
+        if (receiver.status === "pending") {
+          return res
+            .status(400)
+            .send({ error: "Receiver's account not activated" });
+        }
+        const createPending = await agentCashCollection.insertOne({
+          senderEmail,
+          receiverNumber,
+          amount,
+          timestamp: new Date(),
+          status:"pending",
+          type:type
+        })
+        return res.send({ message: "Cash in request successfully", createPending });
       } catch (error) {
         console.error("Error processing request:", error);
         return res.status(500).send({ error: "Internal Server Error" });
@@ -311,6 +335,7 @@ async function run() {
     
       res.send(transactions);
     });
+    //agent transaction get
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
