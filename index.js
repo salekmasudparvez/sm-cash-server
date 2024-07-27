@@ -135,7 +135,7 @@ async function run() {
     });
     //admin set status
     app.patch("/admin/user", async (req, res) => {
-      const { id, status, email, phoneNumber,initialMoney } = req.body;
+      const { id, status, email, phoneNumber, initialMoney } = req.body;
       //console.log(id, status, email, 'line129');
 
       if (!id || !status) {
@@ -223,8 +223,8 @@ async function run() {
             receiverNumber,
             amount,
             timestamp: new Date(),
-            status:"successful",
-            type:type
+            status: "successful",
+            type: type,
           });
           return res.send({ message: "Money sent successfully", transaction });
         }
@@ -236,10 +236,10 @@ async function run() {
       }
     });
 
-    //cash-in-request 
+    //cash-in-request
     app.post("/cashin", async (req, res) => {
       const { senderEmail, receiverNumber, amount, pin, type } = req.body;
-      console.log(senderEmail, receiverNumber, amount, pin,type);
+      console.log(senderEmail, receiverNumber, amount, pin, type);
 
       try {
         const user = await usersCollection.findOne({ email: senderEmail });
@@ -270,10 +270,13 @@ async function run() {
           receiverNumber,
           amount,
           timestamp: new Date(),
-          status:"pending",
-          type:type
-        })
-        return res.send({ message: "Cash in request successfully", createPending });
+          status: "pending",
+          type: type,
+        });
+        return res.send({
+          message: "Cash in request successfully",
+          createPending,
+        });
       } catch (error) {
         console.error("Error processing request:", error);
         return res.status(500).send({ error: "Internal Server Error" });
@@ -282,7 +285,7 @@ async function run() {
     //cash in and out request with same api
     app.post("/cashin", async (req, res) => {
       const { senderEmail, receiverNumber, amount, pin, type } = req.body;
-      console.log(senderEmail, receiverNumber, amount, pin,type);
+      console.log(senderEmail, receiverNumber, amount, pin, type);
 
       try {
         const user = await usersCollection.findOne({ email: senderEmail });
@@ -313,10 +316,13 @@ async function run() {
           receiverNumber,
           amount,
           timestamp: new Date(),
-          status:"pending",
-          type:type
-        })
-        return res.send({ message: "Cash in request successfully", createPending });
+          status: "pending",
+          type: type,
+        });
+        return res.send({
+          message: "Cash in request successfully",
+          createPending,
+        });
       } catch (error) {
         console.error("Error processing request:", error);
         return res.status(500).send({ error: "Internal Server Error" });
@@ -329,13 +335,130 @@ async function run() {
         .find({
           senderEmail: userEmail,
         })
-        .sort({ date: -1 })
+        .sort({ timestamp: -1 })
         .limit(10)
         .toArray();
-    
+
       res.send(transactions);
     });
+    app.get("/agentTransactions/:email", async (req, res) => {
+      const userEmail = req.params.email;
+      const receiverNumber = await usersCollection.findOne({ email: userEmail});
+      console.log(receiverNumber?.phoneNumber)
+      if(receiverNumber?.phoneNumber){
+        const transactions = await transactionsCollection
+          .find({
+            receiverNumber: receiverNumber?.phoneNumber,
+          })
+          .sort({ timestamp: -1 })
+          .limit(20)
+          .toArray();
+          
+      res.send(transactions);
+      }
+     
+
+    });
     //agent transaction get
+    app.get("/request/transactions", async (req, res) => {
+      const transactions = await agentCashCollection
+        .find()
+        .sort({ timestamp: -1 })
+        .limit(10)
+        .toArray();
+      res.send(transactions);
+    });
+    //agent nofication in sidebar
+
+    app.get("/notify", async (req, res) => {
+      const pendingCount = await agentCashCollection.countDocuments({
+        status: "pending",
+      });
+      res.send({ pendingCount });
+    });
+
+    app.patch("/status", async (req, res) => {
+      const { id, status, agentEmail, senderEmail, amount, type, agentNumber } = req.body;
+      if (!id || !status || !agentEmail || !senderEmail || !amount || !type || !agentNumber) {
+        return res.status(400).send({ error: "All information is required" });
+      }
+    
+      const updateDoc = {
+        $set: {
+          status:status,
+        },
+      };
+    
+      let updateDoc1 = {};
+      let updateDoc2 = {};
+    
+      if (type === "cash-in") {
+        updateDoc1 = { $inc: { balance: -parseInt(amount) } };
+        updateDoc2 = { $inc: { balance: parseInt(amount) } };
+      } else {
+        updateDoc1 = { $inc: { balance: parseInt(amount) } };
+        updateDoc2 = { $inc: { balance: -parseInt(amount) } };
+      }
+      //console.log(updateDoc1 ,"_____________________________________",updateDoc2)
+      const filter = {
+        _id: new ObjectId(id),
+      };
+    
+      const filter1 = {
+        ownerEmail: agentEmail,
+      };
+      const filter2 = {
+        ownerEmail: senderEmail,
+      };
+       //console.log(filter1,"________________",filter2)
+      try {
+        if (status === "failed") {
+          const postTransaction = await transactionsCollection.insertOne({
+            senderEmail: senderEmail,
+            receiverNumber: agentNumber,
+            amount,
+            timestamp: new Date(),
+            status: status,
+            type: type,
+          });
+          const updateStatus = await agentCashCollection.updateOne(filter, updateDoc);
+          return res.send(updateStatus);
+         
+        }
+    
+        const agentCash = await balanceCollection.updateOne(filter1, updateDoc1);
+        const userCash = await balanceCollection.updateOne(filter2, updateDoc2);
+        //res.send({userCash})
+    
+        if (agentCash && userCash) {
+          const postTransaction = await transactionsCollection.insertOne({
+            senderEmail: senderEmail,
+            receiverNumber: agentNumber,
+            amount,
+            timestamp: new Date(),
+            status: status,
+            type: type,
+          });
+    
+          const updateStatus = await agentCashCollection.updateOne(filter, updateDoc);
+          res.send(updateStatus);
+        } else {
+          res.status(500).send({ error: "Failed to update balances" });
+        }
+      } catch (error) {
+        console.log(error)
+        res.status(500).send({ error: "An error occurred" });
+      }
+      //res.send("done 1")
+    });
+      
+    //admin get transaction 
+    app.get('/admin/transactions/:email',async(req,res)=>{
+      const email = req.params.email;
+      const transactions = await transactionsCollection.find().toArray()
+      res.send(transactions);
+    })
+
     console.log(
       "Pinged your deployment. You successfully connected to MongoDB!"
     );
